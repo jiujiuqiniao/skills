@@ -2,7 +2,7 @@ name: SodaNative
 options:
   bundleIdPrefix: io.github.jiujiuqiniao
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "26.1"
   xcodeVersion: "26.0"
 settings:
   base:
@@ -28,3 +28,4 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.jiujiuqiniao.sodanative
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
         SUPPORTS_MACCATALYST: NO
+
