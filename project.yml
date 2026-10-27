@@ -1,0 +1,30 @@
+name: SodaNative
+options:
+  bundleIdPrefix: io.github.jiujiuqiniao
+  deploymentTarget:
+    iOS: "26.0"
+  xcodeVersion: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CODE_SIGNING_ALLOWED: NO
+targets:
+  SodaNative:
+    type: application
+    platform: iOS
+    sources:
+      - AppState.swift
+      - QishuiService.swift
+      - SodaNativeApp.swift
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: 气泡音
+        UIBackgroundModes: [audio]
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.jiujiuqiniao.sodanative
+        ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
+        SUPPORTS_MACCATALYST: NO
