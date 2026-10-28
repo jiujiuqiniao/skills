@@ -19,6 +19,8 @@ final class AppState: ObservableObject {
     @Published var errorMessage: String?
     @Published var protectedTrack: Track?
     @Published var showingPlayer = false
+    @Published var showingLogin = false
+    @Published var requiresLogin = false
 
     private let service = QishuiService.shared
     private var player: AVPlayer?
@@ -28,8 +30,10 @@ final class AppState: ObservableObject {
 
     func report(_ error: Error) {
         guard !Task.isCancelled, !RequestPolicy.isCancellation(error) else { return }
+        account = service.account
+        if case SodaError.sessionExpired = error { requiresLogin = true }
         protectedTrack = nil
-        errorMessage = error.localizedDescription
+        errorMessage = RequestPolicy.userMessage(for: error)
     }
 
     init() {

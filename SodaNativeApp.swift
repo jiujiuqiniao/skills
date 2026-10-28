@@ -46,10 +46,20 @@ private struct RootView: View {
         .sheet(isPresented: $state.showingPlayer) {
             FullPlayer()
         }
+        .sheet(isPresented: $state.showingLogin) {
+            LoginView()
+        }
         .alert("提示", isPresented: Binding(
             get: { state.errorMessage != nil },
             set: { if !$0 { state.errorMessage = nil } }
         )) {
+            if state.requiresLogin {
+                Button("重新扫码登录") {
+                    state.errorMessage = nil
+                    state.requiresLogin = false
+                    state.showingLogin = true
+                }
+            }
             if let track = state.protectedTrack,
                let url = URL(string: "https://www.qishui.com/track/\(track.id)") {
                 Button("在官方汽水音乐中打开") {
@@ -552,6 +562,7 @@ private struct LoginView: View {
                     case .scanned: message = "已扫码，请在抖音中确认"
                     case .confirmed(let account):
                         state.account = account
+                        state.requiresLogin = false
                         dismiss()
                         return
                     case .expired: message = "二维码已过期，请刷新"; return

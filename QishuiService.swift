@@ -7,12 +7,16 @@ typealias JSONObject = [String: Any]
 
 enum SodaError: LocalizedError {
     case message(String)
+    case apiCode(Int)
     case protectedAudio
+    case sessionExpired
 
     var errorDescription: String? {
         switch self {
         case let .message(text): return text
+        case let .apiCode(code): return "汽水服务拒绝了请求（\(code)）"
         case .protectedAudio: return "汽水接口仅提供加密音源，此版本暂不支持在应用内播放。可在官方汽水音乐中继续收听。"
+        case .sessionExpired: return "汽水登录凭证已失效，请重新用抖音扫码登录。"
         }
     }
 }
@@ -205,8 +209,12 @@ final class QishuiService {
         guard let json = try JSONSerialization.jsonObject(with: bytes) as? JSONObject else {
             throw SodaError.message("汽水服务返回了无法识别的数据")
         }
-        let error = (json["err_no"] as? Int) ?? (json.object("data")?["error_code"] as? Int) ?? 0
-        guard error == 0 else { throw SodaError.message("汽水服务拒绝了请求（\(error)）") }
+        let error = (json["err_no"] as? Int)
+            ?? (json["err_no"] as? String).flatMap(Int.init)
+            ?? (json.object("data")?["error_code"] as? Int)
+            ?? (json.object("data")?["error_code"] as? String).flatMap(Int.init)
+            ?? 0
+        guard error == 0 else { throw SodaError.apiCode(error) }
         return (json, response)
     }
 
@@ -223,7 +231,7 @@ final class QishuiService {
     }
 
     private func platform(_ path: String, body: JSONObject = [:], signed: Bool = false) async throws -> JSONObject {
-        if signed { try await renewAccountIfNeeded() }
+        if signed, path != "/me/info/" { try await refreshAccountStatus() }
         let address = try url("https://open.douyin.com\(prefix)\(path)")
         var payload = body
         payload["common_params"] = account.map { ["user_id": $0.userId] } ?? [:]
@@ -238,6 +246,20 @@ final class QishuiService {
             let (response, _) = try await send(address, body: payload, headers: headers)
             guard let data = response.object("data") else { throw SodaError.message("汽水返回内容为空") }
             return data
+        } catch let error as SodaError {
+            if signed, case .apiCode(let code) = error,
+               [28001003, 28001007, 28001008, 10007].contains(code) {
+                logout()
+                throw SodaError.sessionExpired
+            }
+            if !signed, case .apiCode(28001008) = error {
+                publicToken = nil
+                headers = ["access-token": try await token()]
+                let (response, _) = try await send(address, body: payload, headers: headers)
+                guard let data = response.object("data") else { throw SodaError.message("汽水返回内容为空") }
+                return data
+            }
+            throw error
         } catch {
             if !signed, error.localizedDescription.contains("28001008") {
                 publicToken = nil
@@ -245,6 +267,34 @@ final class QishuiService {
                 let (response, _) = try await send(address, body: payload, headers: headers)
                 guard let data = response.object("data") else { throw SodaError.message("汽水返回内容为空") }
                 return data
+            }
+            throw error
+        }
+    }
+
+    private func refreshAccountStatus() async throws {
+        guard let saved = account else { throw SodaError.message("请先用抖音扫码登录") }
+        do {
+            try await renewAccountIfNeeded()
+            guard let current = account else { throw SodaError.sessionExpired }
+            let address = try url("https://open.douyin.com\(prefix)/me/info/")
+            let payload: JSONObject = ["common_params": ["user_id": current.userId]]
+            let (response, _) = try await send(address, body: payload,
+                                               headers: guardHeaders(current, "/me/info/"))
+            guard let data = response.object("data"),
+                  let user = data.object("my_info"),
+                  let userId = user.text("id"), !userId.isEmpty else {
+                throw SodaError.message("无法验证汽水账号")
+            }
+            guard userId == saved.userId else {
+                logout()
+                throw SodaError.sessionExpired
+            }
+        } catch let error as SodaError {
+            if case .apiCode(let code) = error,
+               [28001003, 28001007, 28001008, 10007].contains(code) {
+                logout()
+                throw SodaError.sessionExpired
             }
             throw error
         }
@@ -447,7 +497,7 @@ final class QishuiService {
                               guardKey: key.rawRepresentation.base64EncodedString(),
                               guardCert: cert, guardTsSign: signature,
                               accessCode: accessCode, openId: openId,
-                              expiresAt: Date().addingTimeInterval(6 * 3600).timeIntervalSince1970)
+                              expiresAt: credentialExpiry(access.text("expires_time")))
         self.account = account
         let userData = try await platform("/me/info/", signed: true)
         guard let user = userData.object("my_info"), let userId = user.text("id") else {
@@ -505,7 +555,7 @@ final class QishuiService {
         saved.guardTsSign = newSignature
         saved.guardCert = newCert.contains("-----BEGIN")
             ? Data(newCert.utf8).base64EncodedString() : newCert
-        saved.expiresAt = Date().addingTimeInterval(6 * 3600).timeIntervalSince1970
+        saved.expiresAt = credentialExpiry(access.text("expires_time"))
         account = saved
         KeyStore.save(saved)
     }
@@ -541,6 +591,15 @@ final class QishuiService {
         }
         let pem = "-----BEGIN CERTIFICATE REQUEST-----\n\(lines.joined(separator: "\n"))\n-----END CERTIFICATE REQUEST-----\n"
         return Data(pem.utf8).base64EncodedString()
+    }
+
+    private func credentialExpiry(_ raw: String?) -> TimeInterval {
+        guard let raw, let value = Double(raw), value > 0 else {
+            return Date().addingTimeInterval(6 * 3600).timeIntervalSince1970
+        }
+        if value > 1_000_000_000_000 { return value / 1000 }
+        if value > 1_000_000_000 { return value }
+        return Date().addingTimeInterval(value).timeIntervalSince1970
     }
 
     func logout() {
