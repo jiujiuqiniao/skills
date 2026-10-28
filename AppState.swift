@@ -23,11 +23,19 @@ final class AppState: ObservableObject {
     private let service = QishuiService.shared
     private var player: AVPlayer?
     private var finishedObserver: NSObjectProtocol?
+    private var searchRevision = 0
+    private var playbackRevision = 0
+
+    func report(_ error: Error) {
+        guard !Task.isCancelled, !RequestPolicy.isCancellation(error) else { return }
+        protectedTrack = nil
+        errorMessage = error.localizedDescription
+    }
 
     init() {
         account = service.account
         do { try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default) }
-        catch { errorMessage = error.localizedDescription }
+        catch { report(error) }
         MPRemoteCommandCenter.shared().playCommand.addTarget { [weak self] _ in
             Task { @MainActor in self?.resume() }
             return .success
@@ -39,18 +47,24 @@ final class AppState: ObservableObject {
     }
 
     func search(_ query: String) async {
+        searchRevision += 1
+        let revision = searchRevision
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { searchResults = []; return }
         isBusy = true
         defer { isBusy = false }
-        do { searchResults = try await service.search(trimmed) }
-        catch { errorMessage = error.localizedDescription }
+        do {
+            let results = try await service.search(trimmed)
+            try Task.checkCancellation()
+            guard revision == searchRevision else { return }
+            searchResults = results
+        } catch { if revision == searchRevision { report(error) } }
     }
 
     func loadHome() async {
         guard homeTracks.isEmpty else { return }
         do { homeTracks = try await service.search("热门音乐") }
-        catch { errorMessage = error.localizedDescription }
+        catch { report(error) }
     }
 
     func loadLibrary() async {
@@ -62,22 +76,26 @@ final class AppState: ObservableObject {
             likedTracks = try await service.likedTracks()
             recentTracks = try await service.recentTracks()
             collectedPlaylists = try await service.collectedPlaylists()
-        } catch { errorMessage = error.localizedDescription }
+        } catch { report(error) }
     }
 
     func loadPlaylist(_ playlist: Playlist) async {
         isBusy = true
         defer { isBusy = false }
         do { selectedPlaylistTracks = try await service.playlistTracks(playlist) }
-        catch { errorMessage = error.localizedDescription }
+        catch { report(error) }
     }
 
     func play(_ track: Track) async {
+        playbackRevision += 1
+        let revision = playbackRevision
         protectedTrack = nil
         isBusy = true
         defer { isBusy = false }
         do {
             let (url, preview) = try await service.audio(for: track)
+            try Task.checkCancellation()
+            guard revision == playbackRevision else { return }
             if let finishedObserver { NotificationCenter.default.removeObserver(finishedObserver) }
             player?.pause()
             let item = AVPlayerItem(url: url)
@@ -94,8 +112,10 @@ final class AppState: ObservableObject {
             isPlaying = true
             updateNowPlaying()
         } catch {
-            if error.localizedDescription.contains("受保护音频") { protectedTrack = track }
-            errorMessage = error.localizedDescription
+            guard revision == playbackRevision, !Task.isCancelled,
+                  !RequestPolicy.isCancellation(error) else { return }
+            report(error)
+            if case SodaError.protectedAudio = error { protectedTrack = track }
         }
     }
 

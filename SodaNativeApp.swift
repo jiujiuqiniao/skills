@@ -125,11 +125,11 @@ private struct DiscoveryView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task(id: query) {
             do { tracks = try await QishuiService.shared.search(query) }
-            catch { state.errorMessage = error.localizedDescription }
+            catch { state.report(error) }
         }
         .refreshable {
             do { tracks = try await QishuiService.shared.search(query) }
-            catch { state.errorMessage = error.localizedDescription }
+            catch { state.report(error) }
         }
     }
 }
@@ -552,7 +552,6 @@ private struct LoginView: View {
                     case .scanned: message = "已扫码，请在抖音中确认"
                     case .confirmed(let account):
                         state.account = account
-                        await state.loadLibrary()
                         dismiss()
                         return
                     case .expired: message = "二维码已过期，请刷新"; return
@@ -561,7 +560,9 @@ private struct LoginView: View {
                 }
             } catch is CancellationError {
             } catch {
-                message = error.localizedDescription
+                if !Task.isCancelled && !RequestPolicy.isCancellation(error) {
+                    message = error.localizedDescription
+                }
             }
         }
     }

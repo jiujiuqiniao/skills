@@ -7,10 +7,13 @@ typealias JSONObject = [String: Any]
 
 enum SodaError: LocalizedError {
     case message(String)
+    case protectedAudio
 
     var errorDescription: String? {
-        if case let .message(text) = self { return text }
-        return nil
+        switch self {
+        case let .message(text): return text
+        case .protectedAudio: return "汽水接口仅提供加密音源，此版本暂不支持在应用内播放。可在官方汽水音乐中继续收听。"
+        }
     }
 }
 
@@ -145,14 +148,15 @@ final class QishuiService {
     }()
 
     private var common: JSONObject {
-        ["aid": "765213", "app_id": "765213", "app_name": "byte_autoservice_lite",
+        let requestDeviceId = account?.deviceId ?? deviceId
+        return ["aid": "765213", "app_id": "765213", "app_name": "byte_autoservice_lite",
          "version_code": "100010", "version_name": "1.0.10", "channel": "bydSong",
          "sdk_aid": "753999", "caller_name": "luna_open_sdk", "sdk_version_code": "100000100",
          "sdk_version_name": "0.0.1", "sdk_channel": "Test", "vehicle_type": "BYD",
          "device_brand": "BYD", "device_type": "BYD", "device_platform": "android",
          "resolution": "1920x1080", "os_version": "13", "ac": "wifi",
-         "device_id": deviceId, "did": deviceId, "iid": deviceId,
-         "vehicle_id": "qishui-\(deviceId)", "_timestamp": String(Int(Date().timeIntervalSince1970)),
+         "device_id": requestDeviceId, "did": requestDeviceId, "iid": requestDeviceId,
+         "vehicle_id": "qishui-\(requestDeviceId)", "_timestamp": String(Int(Date().timeIntervalSince1970)),
          "_nonce": String(Int.random(in: 0...65535))]
     }
 
@@ -175,6 +179,7 @@ final class QishuiService {
 
     private func send(_ url: URL, body: JSONObject? = nil, form: Bool = false,
                       headers: [String: String] = [:]) async throws -> (JSONObject, HTTPURLResponse) {
+        try Task.checkCancellation()
         var request = URLRequest(url: url)
         request.timeoutInterval = 25
         request.setValue("LunaOpenSDK/1.0.10", forHTTPHeaderField: "User-Agent")
@@ -192,6 +197,7 @@ final class QishuiService {
             }
         }
         let (bytes, rawResponse) = try await session.data(for: request)
+        try Task.checkCancellation()
         guard let response = rawResponse as? HTTPURLResponse else { throw SodaError.message("服务没有返回 HTTP 响应") }
         guard (200..<300).contains(response.statusCode) else {
             throw SodaError.message("汽水服务返回 HTTP \(response.statusCode)")
@@ -261,8 +267,10 @@ final class QishuiService {
     }
 
     func audio(for track: Track) async throws -> (URL, Bool) {
+        var sawProtectedAudio = false
         let data = try await platform("/media/mget/", body: [
-            "media_list": [["id": track.id, "type": "track"]], "card_context": [:] as JSONObject])
+            "media_list": [["id": track.id, "type": "track"]], "card_context": [:] as JSONObject],
+            signed: account != nil)
         let list = data.array("media_list")?.compactMap { $0 as? JSONObject } ?? []
         guard let found = list.first(where: { $0.text("media_id") == track.id }) ?? list.first,
               let detail = found.object("track_entity"),
@@ -277,8 +285,10 @@ final class QishuiService {
             }
             let sources = model?.array("video_list")?.compactMap { $0 as? JSONObject } ?? []
             for item in sources {
-                let protection = item.object("encrypt_info") ?? [:]
-                if protection["encrypt"] as? Bool == true || protection["spade_a"] != nil || item["PlayAuth"] != nil { continue }
+                if RequestPolicy.isProtectedAudio(item) {
+                    sawProtectedAudio = true
+                    continue
+                }
                 if let raw = item.text("main_url"), let source = trustedMediaURL(raw) {
                     return (source, variant == "preview")
                 }
@@ -289,13 +299,18 @@ final class QishuiService {
                     ?? details.object("data")?.array("PlayInfoList")
                     ?? details.array("PlayInfoList") ?? []
                 for value in sources {
-                    guard let item = value as? JSONObject, item["PlayAuth"] == nil,
-                          let raw = item.text("MainPlayUrl"), let source = trustedMediaURL(raw) else { continue }
+                    guard let item = value as? JSONObject else { continue }
+                    if RequestPolicy.isProtectedAudio(item) {
+                        sawProtectedAudio = true
+                        continue
+                    }
+                    guard let raw = item.text("MainPlayUrl"), let source = trustedMediaURL(raw) else { continue }
                     return (source, variant == "preview")
                 }
             }
         }
-        throw SodaError.message("这首歌只返回了受保护音频，当前版本无法播放")
+        if sawProtectedAudio { throw SodaError.protectedAudio }
+        throw SodaError.message("汽水接口暂未提供可播放音源，请稍后重试。")
     }
 
     private func trustedMediaURL(_ raw: String) -> URL? {

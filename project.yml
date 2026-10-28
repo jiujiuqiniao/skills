@@ -17,6 +17,7 @@ targets:
       - AppState.swift
       - QishuiService.swift
       - SodaNativeApp.swift
+      - RequestPolicy.swift
     info:
       path: Info.plist
       properties:
@@ -26,6 +27,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.jiujiuqiniao.sodanative
+        MARKETING_VERSION: "0.1.1"
+        CURRENT_PROJECT_VERSION: "2"
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
         SUPPORTS_MACCATALYST: NO
-
