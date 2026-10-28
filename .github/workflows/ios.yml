@@ -14,6 +14,10 @@ jobs:
         run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
+      - name: Check cancellation and audio classification
+        run: |
+          swiftc RequestPolicy.swift RequestPolicyTests.swift -o "$RUNNER_TEMP/request-policy-tests"
+          "$RUNNER_TEMP/request-policy-tests"
       - name: Build unsigned app
         run: |
           xcodebuild -project SodaNative.xcodeproj -scheme SodaNative -configuration Release \
@@ -28,4 +32,3 @@ jobs:
         with:
           name: SodaNative-unsigned-ipa
           path: SodaNative-unsigned.ipa
-
