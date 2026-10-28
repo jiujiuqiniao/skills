@@ -1,5 +1,11 @@
 # 气泡音（SodaNative）
 
+## 0.1.3 Playback fix (2026-10-28)
+
+- `/media/mget/` uses the public client token, separate from ticket-guard account requests.
+- A media endpoint authentication error no longer clears the signed-in account.
+- Build 4 is pending GitHub Actions and iPhone playback verification.
+
 ## 0.1.1 修复（2026-10-28）
 
 - 页面切换、退出扫码页等正常请求取消，不再显示 `cancelled` 弹窗。

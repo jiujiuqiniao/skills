@@ -247,11 +247,6 @@ final class QishuiService {
             guard let data = response.object("data") else { throw SodaError.message("汽水返回内容为空") }
             return data
         } catch let error as SodaError {
-            if signed, case .apiCode(let code) = error,
-               [28001003, 28001007, 28001008, 10007].contains(code) {
-                logout()
-                throw SodaError.sessionExpired
-            }
             if !signed, case .apiCode(28001008) = error {
                 publicToken = nil
                 headers = ["access-token": try await token()]
@@ -320,7 +315,7 @@ final class QishuiService {
         var sawProtectedAudio = false
         let data = try await platform("/media/mget/", body: [
             "media_list": [["id": track.id, "type": "track"]], "card_context": [:] as JSONObject],
-            signed: account != nil)
+            signed: false)
         let list = data.array("media_list")?.compactMap { $0 as? JSONObject } ?? []
         guard let found = list.first(where: { $0.text("media_id") == track.id }) ?? list.first,
               let detail = found.object("track_entity"),
